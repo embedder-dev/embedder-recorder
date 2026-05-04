@@ -1,0 +1,161 @@
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig EMBEDDER_TRACE
+	bool "Embedder Tracing Module"
+	select TRACING
+	help
+	  Enable the Embedder tracing module. Hooks into Zephyr's kernel
+	  trace points via CONFIG_TRACING_USER and routes trace data over
+	  RTT or ITM/SWO for capture by the Embedder host tools.
+
+	  When enabling this option, also set CONFIG_TRACING_USER=y in
+	  prj.conf (cannot be auto-selected due to Kconfig choice
+	  limitations in external modules).
+
+if EMBEDDER_TRACE
+
+choice EMBEDDER_TRACE_TRANSPORT
+	prompt "Trace Transport"
+	default EMBEDDER_TRACE_TRANSPORT_RTT
+
+config EMBEDDER_TRACE_TRANSPORT_RTT
+	bool "SEGGER RTT transport"
+	select USE_SEGGER_RTT
+	help
+	  Route trace data over a dedicated SEGGER RTT channel.
+	  ISR-safe, no heap allocation. Requires a J-Link debug probe.
+
+config EMBEDDER_TRACE_TRANSPORT_ITM
+	bool "ARM ITM/SWO transport"
+	depends on CPU_CORTEX_M && !CPU_CORTEX_M0 && !CPU_CORTEX_M0PLUS && !CPU_CORTEX_M23
+	help
+	  Route trace data over ARM ITM stimulus ports.
+	  ISR-safe, hardware-buffered. Requires ITM hardware
+	  (Cortex-M3/M4/M7/M33/M55). On boards without SWO,
+	  ITM data is available via the parallel trace port.
+
+endchoice
+
+choice EMBEDDER_TRACE_RTT_MODE
+	prompt "RTT buffer-full policy"
+	default EMBEDDER_TRACE_RTT_MODE_DROP
+	depends on EMBEDDER_TRACE_TRANSPORT_RTT
+
+config EMBEDDER_TRACE_RTT_MODE_DROP
+	bool "Drop (non-blocking)"
+	help
+	  When the RTT buffer is full, new trace packets are silently
+	  dropped and the events_discarded counter incremented. This is
+	  the safest option for real-time behavior: tracing never blocks
+	  the application. Recommended for production.
+
+config EMBEDDER_TRACE_RTT_MODE_BLOCK
+	bool "Block (lossless)"
+	help
+	  When the RTT buffer is full, the write call blocks until space
+	  is available. This guarantees no trace data is lost, but may
+	  introduce unbounded latency in ISR and kernel code paths.
+	  Only use for offline analysis or benchmarks where timing
+	  distortion is acceptable.
+
+config EMBEDDER_TRACE_RTT_MODE_TRIM
+	bool "Trim (non-blocking, partial write)"
+	help
+	  When the RTT buffer is full, the packet is truncated to fit the
+	  remaining space. The host decoder will detect the corrupted
+	  packet via CTF magic/size mismatch and resync. Useful when
+	  partial data is better than no data.
+
+endchoice
+
+config EMBEDDER_TRACE_SCHEDULING_ONLY
+	bool "Scheduling-only tracing"
+	help
+	  When enabled, only thread switch, ISR enter/exit, and idle
+	  events are traced. All other kernel object events (mutex,
+	  semaphore, timer, etc.) are disabled to reduce overhead.
+
+config EMBEDDER_TRACE_USER_EVENTS
+	bool "User event helpers"
+	help
+	  Enable the embedder_trace_event(), embedder_trace_counter(),
+	  and capture marker APIs for application-level instrumentation.
+
+config EMBEDDER_TRACE_RICH_EVENTS
+	bool "Rich user event helpers"
+	select EMBEDDER_TRACE_USER_EVENTS
+	help
+	  Enable higher-level event helpers: typed samples, state
+	  transitions, intervals, sections, and channel metadata.
+
+config EMBEDDER_TRACE_MEMORY
+	bool "Memory and stack helpers"
+	select THREAD_STACK_INFO
+	help
+	  Enable heap allocation tracking and periodic thread stack
+	  high-water-mark sampling via CTF events.
+
+menu "Advanced tuning"
+
+config EMBEDDER_TRACE_RTT_CHANNEL
+	int "RTT channel for trace data"
+	default 2
+	depends on EMBEDDER_TRACE_TRANSPORT_RTT
+	help
+	  RTT channel number. Channel 0 is the console, channel 1 is
+	  modem trace. Default 2.
+
+config EMBEDDER_TRACE_RTT_BUFFER_SIZE
+	int "RTT trace buffer size"
+	default 8192
+	depends on EMBEDDER_TRACE_TRANSPORT_RTT
+	help
+	  Up-buffer size in bytes for trace data. Larger buffers reduce
+	  drops at the cost of RAM. Default holds ~600-1600 events.
+
+config EMBEDDER_TRACE_ITM_PORT
+	int "ITM stimulus port for trace data"
+	default 1
+	depends on EMBEDDER_TRACE_TRANSPORT_ITM
+	help
+	  ITM stimulus port number. Port 0 is typically printf debug.
+
+config EMBEDDER_TRACE_ITM_FIFO_TIMEOUT
+	int "ITM FIFO-ready poll timeout (iterations)"
+	default 1000
+	depends on EMBEDDER_TRACE_TRANSPORT_ITM
+	help
+	  Busy-wait iterations polling ITM FIFO readiness per byte.
+	  0 = fire-and-forget (immediate drop if not ready).
+
+config EMBEDDER_TRACE_SYNC_PERIOD_SHIFT
+	int "Sync packet period (power-of-2 shift)"
+	default 8
+	help
+	  Sync packets emitted every (1 << N) events. Default 8 = every
+	  256 events. Lower = faster late-attach, higher = less overhead.
+
+config EMBEDDER_TRACE_METADATA_SYNC_DIVISOR
+	int "Emit metadata every N sync packets"
+	default 4
+	help
+	  Metadata re-emitted every Nth sync packet. Default 4 = every
+	  1024 events. Set 0 to disable periodic re-emission.
+
+config EMBEDDER_TRACE_HEALTH_INTERVAL_MS
+	int "Trace health check interval (ms)"
+	default 5000
+	help
+	  Interval in ms between health checks. 0 to disable.
+
+config EMBEDDER_TRACE_STACK_SAMPLE_PERIOD_MS
+	int "Stack sample period (ms)"
+	default 1000
+	depends on EMBEDDER_TRACE_MEMORY
+	help
+	  Interval between automatic stack high-water samples.
+	  0 to disable (manual sampling still available).
+
+endmenu # Advanced tuning
+
+endif # EMBEDDER_TRACE

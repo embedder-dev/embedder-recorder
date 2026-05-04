@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+*/build/
+*/*/build/
+*/*/*/build/
+
+# IDE / editor
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Clangd cache
+.cache/
+*/.cache/
+*/*/.cache/
+*/*/*/.cache/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Embedder internal state
+.embedder/hardware/
+.embedder/memory.json
+.embedder/plans/
+.embedder/svd-cache/
+.embedder/traces/
+
+# J-Link
+*.jlink.log
+
+# macOS
+.DS_Store

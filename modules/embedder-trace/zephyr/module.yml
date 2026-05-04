@@ -1,0 +1,5 @@
+name: embedder-trace
+
+build:
+  cmake: .
+  kconfig: Kconfig
