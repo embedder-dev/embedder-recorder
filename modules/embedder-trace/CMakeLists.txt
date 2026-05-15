@@ -4,11 +4,21 @@ if(CONFIG_EMBEDDER_TRACE)
 
 zephyr_include_directories(include)
 
-# Force-include our tracing_user.h before any Zephyr code compiles.
+# Select the correct tracing_user.h for the Zephyr version.
+# Zephyr 4.x has a circular dependency (kernel.h -> heap_constants.h)
+# when tracing_user.h is force-included, so we use a lightweight
+# version with forward declarations instead of #include <zephyr/kernel.h>.
+if(KERNEL_VERSION_MAJOR GREATER_EQUAL 4)
+  set(TRACING_USER_H ${CMAKE_CURRENT_SOURCE_DIR}/include/embedder/tracing_user_v4.h)
+else()
+  set(TRACING_USER_H ${CMAKE_CURRENT_SOURCE_DIR}/include/embedder/tracing_user_v3.h)
+endif()
+
+# Force-include the selected header before any Zephyr code compiles.
 # Uses the same include guard (_TRACE_USER_H) as Zephyr's stock
 # tracing_user.h, preventing the stock header from being loaded.
 zephyr_compile_options(
-  $<$<COMPILE_LANGUAGE:C>:-include ${CMAKE_CURRENT_SOURCE_DIR}/include/embedder/tracing_user.h>
+  $<$<COMPILE_LANGUAGE:C>:-include ${TRACING_USER_H}>
 )
 
 zephyr_library_named(embedder_trace)
