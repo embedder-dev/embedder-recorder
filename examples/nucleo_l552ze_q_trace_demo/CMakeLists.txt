@@ -5,6 +5,6 @@ list(APPEND ZEPHYR_EXTRA_MODULES
 )
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(nucleo_f413zh_trace_demo)
+project(nucleo_l552ze_q_trace_demo)
 
 target_sources(app PRIVATE src/main.c)

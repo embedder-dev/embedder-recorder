@@ -2,9 +2,9 @@
  * Copyright (c) 2025 Embedder
  * SPDX-License-Identifier: Apache-2.0
  *
- * Nucleo-F413ZH Multi-Task Trace Demo
+ * Nucleo-L552ZE-Q Multi-Task Trace Demo
  *
- * Pure multi-task demo for the NUCLEO-F413ZH with dense embedder-trace
+ * Pure multi-task demo for the NUCLEO-L552ZE-Q with dense embedder-trace
  * instrumentation.  Modeled after the nrf9160dk_gnss_demo but without
  * any modem/GNSS code:
  *   - Producer/consumer pair with semaphore synchronization
@@ -12,7 +12,7 @@
  *   - 17 trace channels (counters, intervals, state transitions)
  *   - LED heartbeat via GPIO timer
  *
- * Targets Zephyr 4.x on STM32F413ZH.
+ * Targets Zephyr 4.x on STM32L552ZE.
  */
 
 #include <zephyr/kernel.h>
@@ -22,7 +22,7 @@
 
 #include <embedder/trace.h>
 
-LOG_MODULE_REGISTER(f413zh_demo, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(l552ze_demo, LOG_LEVEL_INF);
 
 /* --------------------------------------------------------------------------
  * User event channel IDs
@@ -355,7 +355,7 @@ int main(void)
 {
 	int err;
 
-	LOG_INF("Nucleo-F413ZH Multi-Task Trace Demo started");
+	LOG_INF("Nucleo-L552ZE-Q Multi-Task Trace Demo started");
 
 	/* ---- LED setup ---- */
 	if (!gpio_is_ready_dt(&led0)) {
@@ -390,11 +390,11 @@ int main(void)
 
 	/* Emit application metadata */
 	embedder_trace_app_metadata("fw_version", "1.0.0");
-	embedder_trace_app_metadata("board", "nucleo_f413zh");
+	embedder_trace_app_metadata("board", "nucleo_l552ze_q");
 	embedder_trace_app_metadata("mode", "multi_task");
 
 	/* Start continuous capture */
-	embedder_trace_capture_start("f413zh_demo");
+	embedder_trace_capture_start("l552ze_demo");
 
 	/* Emit initial state */
 	current_app_state = APP_STATE_IDLE;
