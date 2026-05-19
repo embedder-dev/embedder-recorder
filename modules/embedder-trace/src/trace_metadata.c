@@ -5,9 +5,8 @@
  * Compact stream format descriptor for the Embedder tracing module.
  *
  * Contains a machine-readable event table describing all compact event
- * layouts. Emitted as chunked events (0x303) on the data channel at
- * init and periodically after sync packets to support late-attaching
- * hosts.
+ * layouts. Emitted once as chunked events (0x303) on the data channel
+ * during transport initialization.
  *
  * Each chunk is a compact event:
  *   [u8 length][u16 event_id=0x303][u8 chunk_idx][u8 chunk_count]
@@ -40,8 +39,8 @@ static const char format_descriptor[] =
 "byte_order=le\n"
 "\n"
 "# Kernel Events: Thread\n"
-"0x10 thread_switched_out u32:thread_id str20:name\n"
-"0x11 thread_switched_in u32:thread_id str20:name\n"
+"0x10 thread_switched_out u32:thread_id\n"
+"0x11 thread_switched_in u32:thread_id\n"
 "0x12 thread_priority_set u32:thread_id str20:name i8:prio\n"
 "0x13 thread_create u32:thread_id str20:name\n"
 "0x14 thread_abort u32:thread_id str20:name\n"
@@ -53,8 +52,8 @@ static const char format_descriptor[] =
 "0x1A thread_name_set u32:thread_id str20:name\n"
 "\n"
 "# Kernel Events: ISR / Idle\n"
-"0x1B isr_enter\n"
-"0x1C isr_exit\n"
+"0x1B isr_enter u16:irq\n"
+"0x1C isr_exit u16:irq\n"
 "0x1E idle\n"
 "\n"
 "# Kernel Events: Semaphore\n"
@@ -170,7 +169,18 @@ void embedder_trace_emit_metadata_inline(void)
 
 		pkt[0] = (uint8_t)(cursor - pkt);
 
-		embedder_trace_emit(pkt, pkt[0]);
+		unsigned int w = embedder_trace_emit(pkt, pkt[0]);
+
+		if (w != pkt[0]) {
+			uint8_t unsent_chunks = chunk_count - i;
+
+			for (uint8_t j = 0; j < unsent_chunks; j++) {
+				atomic_inc(&embedder_trace_dropped);
+				atomic_inc(&embedder_trace_overflow_drops);
+			}
+			atomic_set(&embedder_trace_overflow_state, 1);
+			break;
+		}
 
 		offset += chunk_len;
 	}

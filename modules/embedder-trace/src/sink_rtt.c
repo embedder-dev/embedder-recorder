@@ -7,14 +7,15 @@
  * Routes compact trace packets over a dedicated SEGGER RTT channel
  * using SEGGER_RTT_WriteNoLock() for ISR-safe, non-blocking output.
  *
- * Format descriptor metadata is emitted as chunked events (0x303) on
- * the same data channel, periodically after every Nth sync packet.
+ * Format descriptor metadata is emitted once as chunked events (0x303)
+ * on the same data channel during transport initialization.
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/logging/log.h>
 #include <SEGGER_RTT.h>
+#include <embedder/trace.h>
 #include <embedder/trace_transport.h>
 #include <embedder/trace_internal.h>
 
@@ -35,6 +36,20 @@ LOG_MODULE_DECLARE(embedder_trace, LOG_LEVEL_INF);
  * Static up-buffer for the dedicated RTT data channel.
  */
 static uint8_t rtt_up_buffer[CONFIG_EMBEDDER_TRACE_RTT_BUFFER_SIZE];
+static uint8_t rtt_control_buffer[CONFIG_EMBEDDER_TRACE_RTT_CONTROL_BUFFER_SIZE];
+
+#define TRACE_CONTROL_CMD_BYTES 8
+#define TRACE_CONTROL_VERSION 1
+#define TRACE_CONTROL_OP_START_SESSION 1
+#define TRACE_CONTROL_OP_STOP_SESSION 2
+#define TRACE_CONTROL_MAGIC_0 'E'
+#define TRACE_CONTROL_MAGIC_1 'T'
+#define TRACE_CONTROL_MAGIC_2 'R'
+#define TRACE_CONTROL_MAGIC_3 'C'
+
+static struct k_work_delayable trace_control_work;
+static uint8_t trace_control_rx[TRACE_CONTROL_CMD_BYTES];
+static size_t trace_control_rx_len;
 
 /**
  * Running total of events dropped due to RTT buffer overflow.
@@ -54,9 +69,6 @@ uint32_t _embd_last_ts;
 /** Sync packet counter — sync emitted when low bits wrap to 0. */
 uint32_t _embd_sync_counter;
 
-/** Metadata sync divisor counter — metadata emitted every Nth sync. */
-static uint32_t meta_sync_counter;
-
 /** Guard flag: tracing hooks fire before transport_init runs. */
 static atomic_t rtt_ready;
 
@@ -69,6 +81,105 @@ static unsigned int rtt_write(const void *data, uint32_t length)
 				     data, length);
 }
 
+static uint8_t trace_control_checksum(const uint8_t *cmd)
+{
+	uint8_t sum = 0;
+
+	for (size_t i = 0; i < TRACE_CONTROL_CMD_BYTES - 1; i++) {
+		sum = (uint8_t)(sum + cmd[i]);
+	}
+
+	return sum;
+}
+
+static int trace_control_magic_matches_prefix(const uint8_t *cmd, size_t len)
+{
+	const uint8_t magic[] = {
+		TRACE_CONTROL_MAGIC_0,
+		TRACE_CONTROL_MAGIC_1,
+		TRACE_CONTROL_MAGIC_2,
+		TRACE_CONTROL_MAGIC_3,
+	};
+
+	if (len > sizeof(magic)) {
+		return 1;
+	}
+
+	for (size_t i = 0; i < len; i++) {
+		if (cmd[i] != magic[i]) {
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+static void trace_control_handle_command(const uint8_t *cmd)
+{
+	const uint8_t version = cmd[4];
+	const uint8_t op = cmd[5];
+
+	if (version != TRACE_CONTROL_VERSION ||
+	    trace_control_checksum(cmd) != cmd[7]) {
+		return;
+	}
+
+	switch (op) {
+	case TRACE_CONTROL_OP_START_SESSION:
+		if (embedder_trace_emit_preamble()) {
+			embedder_trace_capture_start("host");
+			LOG_DBG("RTT trace start command accepted");
+		}
+		break;
+	case TRACE_CONTROL_OP_STOP_SESSION:
+		embedder_trace_capture_stop();
+		LOG_DBG("RTT trace stop command accepted");
+		break;
+	default:
+		break;
+	}
+}
+
+static void trace_control_feed_byte(uint8_t byte)
+{
+	trace_control_rx[trace_control_rx_len++] = byte;
+
+	if (!trace_control_magic_matches_prefix(trace_control_rx,
+					      trace_control_rx_len)) {
+		trace_control_rx_len = byte == TRACE_CONTROL_MAGIC_0 ? 1 : 0;
+		if (trace_control_rx_len == 1) {
+			trace_control_rx[0] = byte;
+		}
+		return;
+	}
+
+	if (trace_control_rx_len < TRACE_CONTROL_CMD_BYTES) {
+		return;
+	}
+
+	trace_control_handle_command(trace_control_rx);
+	trace_control_rx_len = 0;
+}
+
+static void trace_control_work_handler(struct k_work *work)
+{
+	uint8_t buf[CONFIG_EMBEDDER_TRACE_RTT_CONTROL_BUFFER_SIZE];
+	unsigned int read;
+
+	ARG_UNUSED(work);
+
+	do {
+		read = SEGGER_RTT_Read(CONFIG_EMBEDDER_TRACE_RTT_CONTROL_CHANNEL,
+				       buf, sizeof(buf));
+		for (unsigned int i = 0; i < read; i++) {
+			trace_control_feed_byte(buf[i]);
+		}
+	} while (read == sizeof(buf));
+
+	k_work_schedule(&trace_control_work,
+			K_MSEC(CONFIG_EMBEDDER_TRACE_RTT_CONTROL_POLL_MS));
+}
+
 /*
  * ── Sync Packet Emission ────────────────────────────────────────
  *
@@ -79,8 +190,6 @@ static unsigned int rtt_write(const void *data, uint32_t length)
  *   [u32 absolute_timestamp_ns]
  *   [u32 cpu_freq_hz]
  *
- * After every Nth sync (configured by METADATA_SYNC_DIVISOR), the
- * format descriptor metadata is re-emitted as chunked events.
  */
 int _embedder_trace_emit_sync(void)
 {
@@ -112,12 +221,6 @@ int _embedder_trace_emit_sync(void)
 	/* Only update delta anchor if the sync was fully written. */
 	_embd_last_ts = ts;
 
-#if CONFIG_EMBEDDER_TRACE_METADATA_SYNC_DIVISOR > 0
-	if ((meta_sync_counter++ %
-	     CONFIG_EMBEDDER_TRACE_METADATA_SYNC_DIVISOR) == 0) {
-		embedder_trace_emit_metadata_inline();
-	}
-#endif
 	return 1;
 }
 
@@ -150,28 +253,52 @@ void embedder_transport_init(void)
 			CONFIG_EMBEDDER_TRACE_RTT_CHANNEL, ret);
 	}
 
+	ret = SEGGER_RTT_ConfigDownBuffer(
+		CONFIG_EMBEDDER_TRACE_RTT_CONTROL_CHANNEL,
+		"embedder_trace_ctrl",
+		rtt_control_buffer,
+		sizeof(rtt_control_buffer),
+		SEGGER_RTT_MODE_NO_BLOCK_SKIP);
+
+	if (ret >= 0) {
+		LOG_INF("RTT trace control ready on channel %d (%u bytes)",
+			CONFIG_EMBEDDER_TRACE_RTT_CONTROL_CHANNEL,
+			(unsigned int)sizeof(rtt_control_buffer));
+		k_work_init_delayable(&trace_control_work,
+				      trace_control_work_handler);
+		k_work_schedule(&trace_control_work,
+				K_MSEC(CONFIG_EMBEDDER_TRACE_RTT_CONTROL_POLL_MS));
+	} else {
+		LOG_ERR("RTT trace control channel %d configuration failed: %d",
+			CONFIG_EMBEDDER_TRACE_RTT_CONTROL_CHANNEL, ret);
+	}
+
 	_embd_last_ts = 0;
 	_embd_sync_counter = 0;
-	meta_sync_counter = 0;
 	atomic_set(&rtt_ready, 1);
 
-	/* Emit first sync packet — establishes absolute time anchor. */
-	_embedder_trace_emit_sync();
-
 	/*
-	 * Reset drop/overflow state *after* the first sync so any
-	 * pre-init tracing hook failures don't produce a bogus
-	 * overflow event on the first real EMBEDDER_CTF_EMIT call.
-	 * Set sync counter to 1 so the first emit doesn't immediately
-	 * fire a duplicate sync (counter 0 would trigger the mask check).
+	 * Reset pre-init tracing hook failures before the initial stream
+	 * preamble. Short writes during sync/metadata emission should be
+	 * accounted as real drops.
 	 */
 	atomic_set(&embedder_trace_dropped, 0);
 	atomic_set(&embedder_trace_overflow_state, 0);
 	atomic_set(&embedder_trace_overflow_drops, 0);
-	_embd_sync_counter = 1;
+
+	embedder_trace_emit_preamble();
 }
 
 unsigned int embedder_trace_emit(const uint8_t *data, uint32_t length)
 {
 	return rtt_write(data, length);
+}
+
+int embedder_trace_emit_preamble(void)
+{
+	if (!_embedder_trace_emit_sync()) {
+		return 0;
+	}
+	embedder_trace_emit_metadata_inline();
+	return 1;
 }

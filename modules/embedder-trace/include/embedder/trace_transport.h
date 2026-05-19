@@ -34,10 +34,21 @@ unsigned int embedder_trace_emit(const uint8_t *data, uint32_t length);
  * Emit format descriptor metadata as chunked events on the data channel.
  * Each chunk is a compact event (0x303) with index, count, and payload.
  *
- * Called at init and periodically after every Nth sync packet to
- * support late-attaching hosts. Implemented in trace_metadata.c.
+ * Called once at transport initialization. Implemented in
+ * trace_metadata.c.
  */
 void embedder_trace_emit_metadata_inline(void);
+
+/**
+ * Emit the stream preamble expected by host decoders.
+ *
+ * The preamble is a sync packet followed by the chunked format descriptor.
+ * It is emitted at transport initialization and again when a host asks to
+ * start a recording session, matching Tracealyzer's host-gated start model.
+ *
+ * @return 1 if sync and metadata emission started, 0 if sync failed.
+ */
+int embedder_trace_emit_preamble(void);
 
 /**
  * Emit a sync packet to the data transport.

@@ -77,7 +77,7 @@ static int32_t produced_items;
 static int32_t consumed_items;
 
 /* --------------------------------------------------------------------------
- * Producer thread — generates work items every 50 ms
+ * Producer thread — generates work items at 100 Hz
  * -------------------------------------------------------------------------- */
 #define PRODUCER_STACK_SIZE 2048
 K_THREAD_STACK_DEFINE(producer_stack, PRODUCER_STACK_SIZE);
@@ -105,10 +105,7 @@ static void producer_entry(void *p1, void *p2, void *p3)
 
 		k_sem_give(&work_sem);
 
-		LOG_INF("Producer: item #%d (queue depth %d)",
-			produced_items, depth);
-
-		k_sleep(K_MSEC(50));
+		k_sleep(K_MSEC(10));
 	}
 }
 
@@ -132,8 +129,8 @@ static void consumer_entry(void *p1, void *p2, void *p3)
 		embedder_trace_interval_begin(CH_CONSUMER_WORK);
 		embedder_trace_interval_begin(CH_CONSUMER_LATENCY);
 
-		/* Simulate processing work: 5-15 ms */
-		k_busy_wait(5000 + (sys_rand32_get() % 10000));
+		/* Simulate processing work: 2-5 ms */
+		k_busy_wait(2000 + (sys_rand32_get() % 3000));
 
 		consumed_items++;
 		embedder_trace_counter(CH_CONSUMER_WORK, consumed_items);
@@ -143,7 +140,7 @@ static void consumer_entry(void *p1, void *p2, void *p3)
 		current_app_state = APP_STATE_IDLE;
 		embedder_trace_state(CH_APP_STATE, APP_STATE_IDLE);
 
-		LOG_INF("Consumer: processed item #%d", consumed_items);
+		/* consumer wakes on semaphore, no sleep needed */
 	}
 }
 
@@ -174,7 +171,7 @@ static struct k_thread display_thread;
 static struct k_thread diagnostics_thread;
 static struct k_thread power_mgr_thread;
 
-/* Sensor: simulated temperature reading at 1 kHz */
+/* Sensor: simulated temperature reading at 100 Hz */
 static void sensor_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -185,12 +182,11 @@ static void sensor_entry(void *p1, void *p2, void *p3)
 		temp += (sys_rand32_get() % 100) - 50;
 		embedder_trace_counter(CH_SENSOR_TEMP, temp);
 		embedder_trace_interval_end(CH_SENSOR_TEMP);
-		LOG_INF("Sensor: temp=%d.%02d C", temp / 100, temp % 100);
-		k_sleep(K_MSEC(1));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Battery: simulated voltage monitor every 500 ms */
+/* Battery: simulated voltage monitor at 100 Hz */
 static void battery_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -198,19 +194,18 @@ static void battery_entry(void *p1, void *p2, void *p3)
 
 	while (true) {
 		embedder_trace_interval_begin(CH_BATTERY_MV);
-		k_busy_wait(3000);
+		k_busy_wait(2000);
 		voltage_mv -= (sys_rand32_get() % 5);
 		if (voltage_mv < 3000) {
 			voltage_mv = 3700;
 		}
 		embedder_trace_counter(CH_BATTERY_MV, voltage_mv);
 		embedder_trace_interval_end(CH_BATTERY_MV);
-		LOG_INF("Battery: %d mV", voltage_mv);
-		k_sleep(K_MSEC(500));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Storage: simulated flash write every 400-800 ms */
+/* Storage: simulated flash write at 100 Hz */
 static void storage_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -219,15 +214,14 @@ static void storage_entry(void *p1, void *p2, void *p3)
 	while (true) {
 		write_count++;
 		embedder_trace_interval_begin(CH_STORAGE_WRITE);
-		k_busy_wait(20000);
+		k_busy_wait(4000);
 		embedder_trace_interval_end(CH_STORAGE_WRITE);
 		embedder_trace_counter(CH_STORAGE_WRITE, write_count);
-		LOG_INF("Storage: write #%d", write_count);
-		k_sleep(K_MSEC(400 + (sys_rand32_get() % 400)));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Watchdog: simulated kick every 300-500 ms */
+/* Watchdog: simulated kick at 100 Hz */
 static void watchdog_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -235,14 +229,13 @@ static void watchdog_entry(void *p1, void *p2, void *p3)
 
 	while (true) {
 		kick_count++;
-		k_busy_wait(2000);
+		k_busy_wait(1000);
 		embedder_trace_counter(CH_WATCHDOG_KICK, kick_count);
-		LOG_INF("Watchdog: kick #%d", kick_count);
-		k_sleep(K_MSEC(300 + (sys_rand32_get() % 200)));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Crypto: simulated hash computation every 200-500 ms */
+/* Crypto: simulated hash computation at 100 Hz */
 static void crypto_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -251,15 +244,14 @@ static void crypto_entry(void *p1, void *p2, void *p3)
 	while (true) {
 		hash_count++;
 		embedder_trace_interval_begin(CH_CRYPTO_HASH);
-		k_busy_wait(12000);
+		k_busy_wait(3000);
 		embedder_trace_interval_end(CH_CRYPTO_HASH);
 		embedder_trace_counter(CH_CRYPTO_HASH, hash_count);
-		LOG_INF("Crypto: hash #%d", hash_count);
-		k_sleep(K_MSEC(200 + (sys_rand32_get() % 300)));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Status logger: system stats every 300 ms */
+/* Status logger: system stats at 100 Hz */
 static void status_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -268,16 +260,14 @@ static void status_entry(void *p1, void *p2, void *p3)
 	while (true) {
 		log_seq++;
 		embedder_trace_interval_begin(CH_STATUS_LOG);
-		k_busy_wait(4000);
+		k_busy_wait(2000);
 		embedder_trace_interval_end(CH_STATUS_LOG);
 		embedder_trace_counter(CH_STATUS_LOG, log_seq);
-		LOG_INF("Status: seq #%d, uptime=%u ms", log_seq,
-			k_uptime_get_32());
-		k_sleep(K_MSEC(300));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Comms: simulated packet TX every 1 ms */
+/* Comms: simulated packet TX at 100 Hz */
 static void comms_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -287,16 +277,15 @@ static void comms_entry(void *p1, void *p2, void *p3)
 		int32_t pkt_size = 64 + (sys_rand32_get() % 192);
 
 		embedder_trace_interval_begin(CH_COMMS_TX);
-		k_busy_wait(8000);
+		k_busy_wait(2000);
 		embedder_trace_interval_end(CH_COMMS_TX);
 		tx_bytes += pkt_size;
 		embedder_trace_counter(CH_COMMS_TX, tx_bytes);
-		LOG_INF("Comms: tx %d bytes (total %d)", pkt_size, tx_bytes);
-		k_sleep(K_MSEC(1));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Display: simulated refresh every 300-600 ms */
+/* Display: simulated refresh at 100 Hz */
 static void display_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -305,15 +294,14 @@ static void display_entry(void *p1, void *p2, void *p3)
 	while (true) {
 		frame++;
 		embedder_trace_interval_begin(CH_DISPLAY_REFRESH);
-		k_busy_wait(15000);
+		k_busy_wait(3000);
 		embedder_trace_interval_end(CH_DISPLAY_REFRESH);
 		embedder_trace_counter(CH_DISPLAY_REFRESH, frame);
-		LOG_INF("Display: frame #%d", frame);
-		k_sleep(K_MSEC(300 + (sys_rand32_get() % 300)));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Diagnostics: self-check every 500-900 ms */
+/* Diagnostics: self-check at 100 Hz */
 static void diagnostics_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -322,15 +310,14 @@ static void diagnostics_entry(void *p1, void *p2, void *p3)
 	while (true) {
 		check_count++;
 		embedder_trace_interval_begin(CH_DIAG_CHECK);
-		k_busy_wait(9000);
+		k_busy_wait(2000);
 		embedder_trace_interval_end(CH_DIAG_CHECK);
 		embedder_trace_counter(CH_DIAG_CHECK, check_count);
-		LOG_INF("Diagnostics: check #%d OK", check_count);
-		k_sleep(K_MSEC(500 + (sys_rand32_get() % 400)));
+		k_sleep(K_MSEC(10));
 	}
 }
 
-/* Power manager: simulated sleep policy every 1 s */
+/* Power manager: simulated sleep policy at 100 Hz */
 static void power_mgr_entry(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -340,11 +327,10 @@ static void power_mgr_entry(void *p1, void *p2, void *p3)
 	while (true) {
 		cycle++;
 		state = (uint8_t)(cycle % 3);
-		k_busy_wait(3000);
+		k_busy_wait(1000);
 		embedder_trace_state(CH_POWER_STATE, state);
 		embedder_trace_counter(CH_POWER_STATE, cycle);
-		LOG_INF("Power: cycle #%d state=%d", cycle, state);
-		k_sleep(K_SECONDS(1));
+		k_sleep(K_MSEC(10));
 	}
 }
 

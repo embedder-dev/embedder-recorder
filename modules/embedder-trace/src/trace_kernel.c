@@ -81,24 +81,18 @@ static void get_thread_name(struct k_thread *thread,
 
 void sys_trace_thread_switched_out_user(void)
 {
-	embedder_ctf_bounded_string_t name = { "unknown" };
 	struct k_thread *thread = k_sched_current_thread_query();
 	uint32_t thread_id = (uint32_t)(uintptr_t)thread;
 
-	get_thread_name(thread, &name);
-	EMBEDDER_CTF_EMIT(EMBEDDER_CTF_KERNEL_THREAD_SWITCHED_OUT,
-			     thread_id, name);
+	EMBEDDER_CTF_EMIT(EMBEDDER_CTF_KERNEL_THREAD_SWITCHED_OUT, thread_id);
 }
 
 void sys_trace_thread_switched_in_user(void)
 {
-	embedder_ctf_bounded_string_t name = { "unknown" };
 	struct k_thread *thread = k_sched_current_thread_query();
 	uint32_t thread_id = (uint32_t)(uintptr_t)thread;
 
-	get_thread_name(thread, &name);
-	EMBEDDER_CTF_EMIT(EMBEDDER_CTF_KERNEL_THREAD_SWITCHED_IN,
-			     thread_id, name);
+	EMBEDDER_CTF_EMIT(EMBEDDER_CTF_KERNEL_THREAD_SWITCHED_IN, thread_id);
 }
 
 void sys_trace_thread_priority_set_user(struct k_thread *thread, int prio)
@@ -215,12 +209,16 @@ void sys_trace_thread_name_set_user(struct k_thread *thread)
 
 void sys_trace_isr_enter_user(void)
 {
-	EMBEDDER_CTF_EMIT_NOARGS(EMBEDDER_CTF_KERNEL_ISR_ENTER);
+	uint16_t irq = (uint16_t)(__get_IPSR() & 0x1FF);
+
+	EMBEDDER_CTF_EMIT(EMBEDDER_CTF_KERNEL_ISR_ENTER, irq);
 }
 
 void sys_trace_isr_exit_user(void)
 {
-	EMBEDDER_CTF_EMIT_NOARGS(EMBEDDER_CTF_KERNEL_ISR_EXIT);
+	uint16_t irq = (uint16_t)(__get_IPSR() & 0x1FF);
+
+	EMBEDDER_CTF_EMIT(EMBEDDER_CTF_KERNEL_ISR_EXIT, irq);
 }
 
 void sys_trace_idle_user(void)

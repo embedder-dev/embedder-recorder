@@ -113,6 +113,29 @@ config EMBEDDER_TRACE_RTT_BUFFER_SIZE
 	  Up-buffer size in bytes for trace data. Larger buffers reduce
 	  drops at the cost of RAM. Default holds ~600-1600 events.
 
+config EMBEDDER_TRACE_RTT_CONTROL_CHANNEL
+	int "RTT channel for trace control commands"
+	default 1
+	depends on EMBEDDER_TRACE_TRANSPORT_RTT
+	help
+	  RTT down-buffer channel number used by host tools to request a fresh
+	  trace preamble. Channel 0 is usually the terminal input channel.
+
+config EMBEDDER_TRACE_RTT_CONTROL_BUFFER_SIZE
+	int "RTT trace control buffer size"
+	default 64
+	depends on EMBEDDER_TRACE_TRANSPORT_RTT
+	help
+	  Down-buffer size in bytes for host trace control commands.
+
+config EMBEDDER_TRACE_RTT_CONTROL_POLL_MS
+	int "RTT trace control poll interval (ms)"
+	default 20
+	depends on EMBEDDER_TRACE_TRANSPORT_RTT
+	help
+	  Interval between host control command polls. Lower values make host
+	  trace start more responsive at the cost of slightly more workqueue use.
+
 config EMBEDDER_TRACE_ITM_PORT
 	int "ITM stimulus port for trace data"
 	default 1
@@ -134,13 +157,6 @@ config EMBEDDER_TRACE_SYNC_PERIOD_SHIFT
 	help
 	  Sync packets emitted every (1 << N) events. Default 8 = every
 	  256 events. Lower = faster late-attach, higher = less overhead.
-
-config EMBEDDER_TRACE_METADATA_SYNC_DIVISOR
-	int "Emit metadata every N sync packets"
-	default 4
-	help
-	  Metadata re-emitted every Nth sync packet. Default 4 = every
-	  1024 events. Set 0 to disable periodic re-emission.
 
 config EMBEDDER_TRACE_HEALTH_INTERVAL_MS
 	int "Trace health check interval (ms)"

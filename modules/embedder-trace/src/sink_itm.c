@@ -6,8 +6,8 @@
  *
  * Routes compact trace packets over ARM ITM stimulus ports via SWO.
  *
- * Format descriptor metadata is emitted as chunked events (0x303) on
- * the same data port, periodically after every Nth sync packet.
+ * Format descriptor metadata is emitted once as chunked events (0x303)
+ * on the same data port during transport initialization.
  *
  * ISR-safe: writes are direct register stores with FIFO-ready polling.
  */
@@ -49,9 +49,6 @@ uint32_t _embd_last_ts;
 
 /** Sync packet counter — sync emitted when low bits wrap to 0. */
 uint32_t _embd_sync_counter;
-
-/** Metadata sync divisor counter — metadata emitted every Nth sync. */
-static uint32_t meta_sync_counter;
 
 /**
  * Write a buffer byte-by-byte to an ITM stimulus port.
@@ -119,12 +116,6 @@ int _embedder_trace_emit_sync(void)
 	/* Only update delta anchor if the sync was fully written. */
 	_embd_last_ts = ts;
 
-#if CONFIG_EMBEDDER_TRACE_METADATA_SYNC_DIVISOR > 0
-	if ((meta_sync_counter++ %
-	     CONFIG_EMBEDDER_TRACE_METADATA_SYNC_DIVISOR) == 0) {
-		embedder_trace_emit_metadata_inline();
-	}
-#endif
 	return 1;
 }
 
@@ -155,25 +146,29 @@ void embedder_transport_init(void)
 		data_port, CONFIG_EMBEDDER_TRACE_ITM_FIFO_TIMEOUT);
 	_embd_last_ts = 0;
 	_embd_sync_counter = 0;
-	meta_sync_counter = 0;
-
-	/* Emit first sync packet */
-	_embedder_trace_emit_sync();
 
 	/*
-	 * Reset drop/overflow state *after* the first sync so any
-	 * pre-init tracing hook failures don't produce a bogus
-	 * overflow event on the first real EMBEDDER_CTF_EMIT call.
-	 * Set sync counter to 1 so the first emit doesn't immediately
-	 * fire a duplicate sync (counter 0 would trigger the mask check).
+	 * Reset pre-init tracing hook failures before the initial stream
+	 * preamble. Short writes during sync/metadata emission should be
+	 * accounted as real drops.
 	 */
 	atomic_set(&embedder_trace_dropped, 0);
 	atomic_set(&embedder_trace_overflow_state, 0);
 	atomic_set(&embedder_trace_overflow_drops, 0);
-	_embd_sync_counter = 1;
+
+	embedder_trace_emit_preamble();
 }
 
 unsigned int embedder_trace_emit(const uint8_t *data, uint32_t length)
 {
 	return itm_write(data, length);
+}
+
+int embedder_trace_emit_preamble(void)
+{
+	if (!_embedder_trace_emit_sync()) {
+		return 0;
+	}
+	embedder_trace_emit_metadata_inline();
+	return 1;
 }
